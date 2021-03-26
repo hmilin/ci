@@ -1,0 +1,47 @@
+image: node:10.22.0-stretch
+
+cache:
+  key: node-modules-cache
+  paths:
+    - node_modules
+
+stages:
+  - build
+  - build-image-and-deploy
+
+build:
+  only:
+    - tags
+    - dev
+    - /^release-.*$/
+  stage: build
+  script:
+    - yarn
+    - npm run build
+    - ls dist
+  artifacts:
+    paths:
+      - dist/
+  tags:
+    - web
+
+build-image-and-deploy:
+  only:
+    - tags
+    - dev
+    - /^release-.*$/
+  stage: build-image-and-deploy
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get add openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$DEV_INFRA_SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+    - export curDateTime=`date +%m%d%H%m`
+    - export VERSION=$(node -p "require('./package.json').version")-$curDateTime
+  script:
+    - ssh root@$DEV_INFRA_IP "cd /data/biz/web/latest/web/html && rm -rf factory"
+    - ls dist
+    - scp -r dist/factory root@$DEV_INFRA_IP:/data/biz/web/latest/web/html
+    - ssh root@$DEV_INFRA_IP "cd /data/biz/web/latest && ./manage.sh build web $VERSION && cd /data/biz/latest && WEB_VERSION=$VERSION && ./manage.sh run web $VERSION"
