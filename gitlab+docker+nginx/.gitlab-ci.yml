@@ -1,0 +1,44 @@
+stages:
+  - build
+  - deploy
+
+# 构建镜像
+build:
+  image: docker:20.10.16-dind
+  # 限制哪些分支可以需要触发Pipeline
+  only:
+    - dev
+    - /^release-.*$/
+  stage: build
+  before_script:
+    - export curDateTime=`date +%Y%m%d%H%M%S`
+    # 从package.json中读出版本号作为镜像的tag
+    - export VERSION=$(cat package.json | sed 's/,/\n/g' | grep "version" | sed 's/:/\n/g' | sed  '1d' | sed 's/"//g')-$curDateTime
+    - echo "BUILD_VARIABLE=$VERSION" >> build.env
+  script:
+    - until docker info; do sleep 1; done
+    - docker build --cache-from $HARBOR_REPOSITORY:latest -t $HARBOR_REPOSITORY:latest .
+    - docker tag $HARBOR_REPOSITORY:latest $HARBOR_REPOSITORY:$VERSION
+    - docker push $HARBOR_REPOSITORY:latest
+    - docker push $HARBOR_REPOSITORY:$VERSION
+  tags:
+    - web
+
+# 部署到开发环境
+deploy:
+  only:
+    # 限制哪些分支可以需要触发Pipeline
+    - dev
+    - /^release-.*$/
+  stage: deploy
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get add openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - echo "$DEV_INFRA_SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config
+  script:
+    # 部署脚本执行
+  tags:
+    - web
